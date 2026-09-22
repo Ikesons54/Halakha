@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Navigation,
-} from './components/Navigation';
+import { Navigation } from './components/Navigation';
 import { DailyDiscoveryFeed } from './components/discovery/DailyDiscoveryFeed';
 import { ExploreView } from './components/explore/ExploreView';
 import { BibleReader } from './components/bible/BibleReader';
@@ -13,22 +11,33 @@ import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { NoteModal } from './components/stash/NoteModal';
 import { IdeaCard } from './components/discovery/IdeaCard';
 import { AboutHalakhaModal } from './components/about/AboutHalakhaModal';
+import { AuthModal } from './components/auth/AuthModal';
 import { StorageService } from './lib/storage';
+import { DatabaseService } from './lib/database';
 import { Idea, Scripture, Topic, StudyPath, Profile, KnowledgeGraphData } from './types';
-import { X } from 'lucide-react';
+import { User as FirebaseUser } from 'firebase/auth';
+import { X, CloudCheck, Sparkles } from 'lucide-react';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'home' | 'explore' | 'bible' | 'study' | 'stash' | 'admin'>('home');
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('halakha_theme') === 'dark' ||
+      return (
+        localStorage.getItem('halakha_theme') === 'dark' ||
         localStorage.getItem('rooted_theme') === 'dark' ||
-        (!('halakha_theme' in localStorage) && !('rooted_theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        (!('halakha_theme' in localStorage) &&
+          !('rooted_theme' in localStorage) &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches)
+      );
     }
     return false;
   });
 
-  // App data state synced with StorageService
+  // Auth state
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+  // App data state synced with Firestore & StorageService
   const [profile, setProfile] = useState<Profile>(() => StorageService.getProfile());
   const [ideas, setIdeas] = useState<Idea[]>(() => StorageService.getIdeas());
   const [topics, setTopics] = useState<Topic[]>(() => StorageService.getTopics());
@@ -62,20 +71,71 @@ export default function App() {
 
   // Check onboarding on first load
   useEffect(() => {
-    if (!profile.onboardingCompleted) {
+    if (!profile.onboardingCompleted && !currentUser) {
       setIsOnboardingOpen(true);
     }
-  }, [profile.onboardingCompleted]);
+  }, [profile.onboardingCompleted, currentUser]);
 
-  // Refresh all state from StorageService
-  const refreshData = useCallback(() => {
-    setProfile(StorageService.getProfile());
-    setIdeas(StorageService.getIdeas());
-    setTopics(StorageService.getTopics());
-    setScriptures(StorageService.getScriptures());
-    setStudyPaths(StorageService.getStudyPaths());
-    setGraphData(StorageService.getKnowledgeGraph());
+  // Initialize Firestore Public Corpus on startup
+  useEffect(() => {
+    DatabaseService.initializePublicCorpus()
+      .then(async () => {
+        const [cloudTopics, cloudScriptures, cloudPaths, cloudGraph] = await Promise.all([
+          DatabaseService.getTopics(),
+          DatabaseService.getScriptures(),
+          DatabaseService.getStudyPaths(),
+          DatabaseService.getKnowledgeGraph(),
+        ]);
+        if (cloudTopics.length) setTopics(cloudTopics);
+        if (cloudScriptures.length) setScriptures(cloudScriptures);
+        if (cloudPaths.length) setStudyPaths(cloudPaths);
+        if (cloudGraph) setGraphData(cloudGraph);
+      })
+      .catch((err) => console.warn('Firestore initial corpus sync warning:', err));
   }, []);
+
+  // Listen to Firebase Authentication & subscribe to User Profile
+  useEffect(() => {
+    const unsubAuth = DatabaseService.onAuthChange(async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        const userProfile = await DatabaseService.ensureUserProfile(user);
+        setProfile(userProfile);
+      } else {
+        setProfile(StorageService.getProfile());
+      }
+    });
+
+    return () => unsubAuth();
+  }, []);
+
+  // Real-time Firestore subscription to Ideas (with role awareness)
+  useEffect(() => {
+    const userRole = profile.role === 'admin' || currentUser?.email === 'savedsoul898@gmail.com' ? 'admin' : 'user';
+    const unsubIdeas = DatabaseService.subscribeToIdeas((updatedIdeas) => {
+      setIdeas(updatedIdeas);
+    }, userRole);
+
+    return () => unsubIdeas();
+  }, [profile.role, currentUser?.email]);
+
+  // Refresh all state helper
+  const refreshData = useCallback(async () => {
+    if (currentUser) {
+      const p = await DatabaseService.getProfile(currentUser.uid);
+      setProfile(p);
+    } else {
+      setProfile(StorageService.getProfile());
+    }
+    const [t, sc, sp] = await Promise.all([
+      DatabaseService.getTopics(),
+      DatabaseService.getScriptures(),
+      DatabaseService.getStudyPaths(),
+    ]);
+    if (t.length) setTopics(t);
+    if (sc.length) setScriptures(sc);
+    if (sp.length) setStudyPaths(sp);
+  }, [currentUser]);
 
   const handleToggleDarkMode = () => {
     setDarkMode((prev) => !prev);
@@ -113,7 +173,12 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Only published ideas should show in regular user feed
+  const handleSignOut = async () => {
+    await DatabaseService.signOut();
+    setCurrentTab('home');
+  };
+
+  // Only published ideas show in regular user feeds
   const publishedIdeas = ideas.filter((i) => i.status === 'PUBLISHED');
 
   return (
@@ -129,11 +194,14 @@ export default function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         profile={profile}
+        currentUser={currentUser}
         darkMode={darkMode}
         onToggleDarkMode={handleToggleDarkMode}
         onOpenSearch={() => handleNavigateToExplore()}
         onOpenOnboarding={() => setIsOnboardingOpen(true)}
         onOpenAbout={() => setIsAboutOpen(true)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onSignOut={handleSignOut}
       />
 
       {/* Main View Area */}
@@ -228,7 +296,7 @@ export default function App() {
               </span>
             </div>
             <span className="text-[11px] text-[#69716B] dark:text-[#AEB6AF]">
-              Exploring the biblical world through a Messianic Jewish lens
+              Exploring the biblical world through a Messianic Jewish lens • Powered by © Copyright 2026 FWXplus
             </span>
           </div>
           <div className="flex items-center gap-4 text-[11px]">
@@ -250,25 +318,34 @@ export default function App() {
             >
               Preferences
             </button>
-            <button
-              onClick={() => setCurrentTab('admin')}
-              className="hover:text-[#B39452] transition-colors font-semibold"
-            >
-              CMS Admin
-            </button>
+            {(profile.role === 'admin' || currentUser?.email === 'savedsoul898@gmail.com') && (
+              <button
+                onClick={() => setCurrentTab('admin')}
+                className="hover:text-[#B39452] transition-colors font-semibold"
+              >
+                CMS Admin
+              </button>
+            )}
           </div>
         </div>
       </footer>
 
       {/* Modals & Dialogs */}
 
-      {/* 0. About HALAKHA Modal */}
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={refreshData}
+      />
+
+      {/* About HALAKHA Modal */}
       <AboutHalakhaModal
         isOpen={isAboutOpen}
         onClose={() => setIsAboutOpen(false)}
       />
 
-      {/* 1. Scripture Knowledge Graph Modal */}
+      {/* Scripture Knowledge Graph Modal */}
       <KnowledgeGraphModal
         isOpen={isKnowledgeGraphOpen}
         onClose={() => setIsKnowledgeGraphOpen(false)}
@@ -279,7 +356,7 @@ export default function App() {
         onOpenScriptureByRef={handleOpenScriptureByRef}
       />
 
-      {/* 2. Onboarding / Preferences Modal */}
+      {/* Onboarding / Preferences Modal */}
       <OnboardingModal
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}
@@ -287,16 +364,17 @@ export default function App() {
         onProfileUpdated={refreshData}
       />
 
-      {/* 3. Scripture / Idea Reflection Note Modal */}
+      {/* Scripture / Idea Reflection Note Modal */}
       <NoteModal
         isOpen={Boolean(noteModalTarget)}
         onClose={() => setNoteModalTarget(null)}
         idea={noteModalTarget?.idea}
         scripture={noteModalTarget?.scripture}
+        userId={profile.id}
         onNoteSaved={refreshData}
       />
 
-      {/* 4. Idea Preview Modal */}
+      {/* Idea Preview Modal */}
       {previewIdea && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
           <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto bg-transparent relative">

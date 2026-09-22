@@ -133,7 +133,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 Discoveries ({searchResults.ideas.length})
               </span>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {searchResults.ideas.map((idea) => (
+                {searchResults.ideas.map((idea: Idea) => (
                   <div
                     key={idea.id}
                     onClick={() => onOpenIdeaCard(idea)}
@@ -161,7 +161,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 Scripture Passages ({searchResults.scriptures.length})
               </span>
               <div className="space-y-2">
-                {searchResults.scriptures.map((sc) => (
+                {searchResults.scriptures.map((sc: Scripture) => (
                   <div
                     key={sc.id}
                     onClick={() => onOpenScripture(sc)}

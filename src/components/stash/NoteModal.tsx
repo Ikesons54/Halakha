@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { X, Edit3, BookOpen, Sparkles, Check } from 'lucide-react';
 import { Idea, Scripture } from '../../types';
-import { StorageService } from '../../lib/storage';
+import { DatabaseService } from '../../lib/database';
 
 interface NoteModalProps {
   isOpen: boolean;
   onClose: () => void;
   idea?: Idea | null;
   scripture?: Scripture | null;
+  userId?: string;
   onNoteSaved: () => void;
 }
 
@@ -16,6 +17,7 @@ export const NoteModal: React.FC<NoteModalProps> = ({
   onClose,
   idea,
   scripture,
+  userId,
   onNoteSaved,
 }) => {
   const [content, setContent] = useState('');
@@ -29,11 +31,12 @@ export const NoteModal: React.FC<NoteModalProps> = ({
     ? `Note on ${scripture.reference}`
     : 'Personal Study Reflection';
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
 
-    StorageService.saveNote({
+    const targetUserId = userId || DatabaseService.getCurrentUser()?.uid || 'guest';
+    await DatabaseService.saveNote(targetUserId, {
       ideaId: idea?.id,
       scriptureId: scripture?.id,
       referenceTitle: defaultTitle,

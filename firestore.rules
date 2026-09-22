@@ -1,0 +1,112 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email != null && request.auth.token.email == 'savedsoul898@gmail.com') ||
+        (exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    // Public Curated Content: anyone can read; only verified admins can create/update/delete
+    match /topics/{topicId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /scriptures/{scriptureId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /ideas/{ideaId} {
+      // Unauthenticated / normal users can read published ideas
+      // Admins can read all ideas (including drafts, in-review)
+      allow read: if resource.data.status == 'PUBLISHED' || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /study_paths/{pathId} {
+      allow read: if resource.data.published == true || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /knowledge_graphs/{graphId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // User Profile: authenticated users can create & update their own profile
+    // Role privilege escalation is guarded (only existing admin can alter role)
+    match /profiles/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && (
+        !request.resource.data.keys().hasAny(['role']) ||
+        request.resource.data.role == 'user' ||
+        request.auth.token.email == 'savedsoul898@gmail.com'
+      );
+      allow update: if (isOwner(userId) && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
+        request.auth.token.email == 'savedsoul898@gmail.com'
+      )) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // User private sub-collections: /users/{userId}/...
+    // Users can only read and write to their own private notes and saved_ideas
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+
+      match /saved_ideas/{saveId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /notes/{noteId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /collections/{collectionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /user_progress/{progressId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Private User Content collections: strictly isolated by userId
+    match /saved_ideas/{saveId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    match /collections/{collectionId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    match /notes/{noteId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    match /user_progress/{progressId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

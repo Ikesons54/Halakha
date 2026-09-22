@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Bookmark,
   FolderPlus,
@@ -12,8 +12,8 @@ import {
   Folder,
   ArrowRight,
 } from 'lucide-react';
-import { Idea, Collection, Note, Scripture, Profile } from '../../types';
-import { StorageService } from '../../lib/storage';
+import { Idea, Collection, Note, Scripture, Profile, SavedIdea, UserProgress } from '../../types';
+import { DatabaseService } from '../../lib/database';
 
 interface StashViewProps {
   ideas: Idea[];
@@ -40,32 +40,50 @@ export const StashView: React.FC<StashViewProps> = ({
   const [newColDesc, setNewColDesc] = useState('');
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
 
-  const savedEntries = StorageService.getSavedIdeas();
+  const [savedEntries, setSavedEntries] = useState<SavedIdea[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [progress, setProgress] = useState<UserProgress[]>([]);
+
+  useEffect(() => {
+    const unsubSaved = DatabaseService.subscribeToSavedIdeas(profile.id, setSavedEntries);
+    const unsubCols = DatabaseService.subscribeToCollections(profile.id, setCollections);
+    const unsubNotes = DatabaseService.subscribeToNotes(profile.id, setNotes);
+    const unsubProg = DatabaseService.subscribeToUserProgress(profile.id, setProgress);
+
+    return () => {
+      unsubSaved();
+      unsubCols();
+      unsubNotes();
+      unsubProg();
+    };
+  }, [profile.id]);
+
   const savedIdeaIds = new Set(savedEntries.map((s) => s.ideaId));
   const savedIdeas = ideas.filter((i) => savedIdeaIds.has(i.id));
 
-  const collections = StorageService.getCollections();
-  const notes = StorageService.getNotes();
-  const progress = StorageService.getUserProgress();
-
-  const handleCreateCollection = (e: React.FormEvent) => {
+  const handleCreateCollection = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newColName.trim()) return;
-    StorageService.createCollection(newColName.trim(), newColDesc.trim());
+    await DatabaseService.saveCollection(profile.id, {
+      name: newColName.trim(),
+      description: newColDesc.trim(),
+      ideaIds: [],
+    });
     setNewColName('');
     setNewColDesc('');
     setShowCreateCollectionModal(false);
     onDataChanged();
   };
 
-  const handleDeleteNote = (id: string) => {
-    StorageService.deleteNote(id);
+  const handleDeleteNote = async (id: string) => {
+    await DatabaseService.deleteNote(profile.id, id);
     onDataChanged();
   };
 
-  const handleRemoveSaved = (ideaId: string, e: React.MouseEvent) => {
+  const handleRemoveSaved = async (ideaId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    StorageService.toggleSaveIdea(ideaId);
+    await DatabaseService.toggleSaveIdea(profile.id, ideaId);
     onDataChanged();
   };
 

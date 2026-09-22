@@ -1,0 +1,198 @@
+{
+  "entities": {
+    "Topic": {
+      "title": "Topic",
+      "description": "A thematic topic in Scripture",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "hebrewName": { "type": "string" },
+        "hebrewMeaning": { "type": "string" },
+        "description": { "type": "string" },
+        "icon": { "type": "string" },
+        "color": { "type": "string" },
+        "count": { "type": "number" }
+      },
+      "required": ["id", "name", "slug"]
+    },
+    "Scripture": {
+      "title": "Scripture",
+      "description": "Scripture passage with text, translation, context, and cross references",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reference": { "type": "string" },
+        "book": { "type": "string" },
+        "chapter": { "type": "number" },
+        "verse": { "type": "string" },
+        "translation": { "type": "string" },
+        "text": { "type": "string" },
+        "hebrewText": { "type": "string" },
+        "contextNotes": { "type": "string" },
+        "connections": { "type": "array" }
+      },
+      "required": ["id", "reference", "text"]
+    },
+    "Idea": {
+      "title": "Idea",
+      "description": "5-layer bite-sized discovery idea",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "category": { "type": "string" },
+        "hook": { "type": "string" },
+        "summary": { "type": "string" },
+        "content": { "type": "string" },
+        "context": { "type": "string" },
+        "interpretation": { "type": "string" },
+        "application": { "type": "string" },
+        "status": { "type": "string", "enum": ["DRAFT", "IN_REVIEW", "PUBLISHED", "ARCHIVED"] },
+        "featured": { "type": "boolean" },
+        "createdBy": { "type": "string" },
+        "publishedAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "scriptureIds": { "type": "array" },
+        "topicSlugs": { "type": "array" },
+        "readTimeMinutes": { "type": "number" }
+      },
+      "required": ["id", "title", "category", "status"]
+    },
+    "StudyPath": {
+      "title": "StudyPath",
+      "description": "Guided structured learning path",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "description": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "estimatedMinutes": { "type": "number" },
+        "published": { "type": "boolean" },
+        "lessons": { "type": "array" }
+      },
+      "required": ["id", "title", "lessons"]
+    },
+    "KnowledgeGraph": {
+      "title": "KnowledgeGraph",
+      "description": "Interactive cross-testament relational network",
+      "type": "object",
+      "properties": {
+        "nodes": { "type": "array" },
+        "links": { "type": "array" },
+        "centralNode": { "type": "string" }
+      },
+      "required": ["nodes", "links"]
+    },
+    "Profile": {
+      "title": "Profile",
+      "description": "User profile with roles and study preferences",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "displayName": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "bio": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] }
+      },
+      "required": ["id", "displayName"]
+    },
+    "SavedIdea": {
+      "title": "SavedIdea",
+      "description": "User saved discovery entry in stash",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "ideaId": { "type": "string" },
+        "savedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "ideaId"]
+    },
+    "Collection": {
+      "title": "Collection",
+      "description": "User created custom idea collection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ideaIds": { "type": "array" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Personal reflection note on a scripture or discovery",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "referenceTitle": { "type": "string" },
+        "content": { "type": "string" }
+      },
+      "required": ["id", "userId", "content"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "Lesson completion tracking for study paths",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "studyPathId": { "type": "string" },
+        "lessonId": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "userId", "studyPathId", "lessonId"]
+    }
+  },
+  "firestore": {
+    "/topics/{topicId}": {
+      "schema": "Topic",
+      "description": "Curated biblical topics"
+    },
+    "/scriptures/{scriptureId}": {
+      "schema": "Scripture",
+      "description": "Curated Scripture passages"
+    },
+    "/ideas/{ideaId}": {
+      "schema": "Idea",
+      "description": "5-layer bite-sized discovery ideas"
+    },
+    "/study_paths/{pathId}": {
+      "schema": "StudyPath",
+      "description": "Guided structured learning paths"
+    },
+    "/knowledge_graphs/{graphId}": {
+      "schema": "KnowledgeGraph",
+      "description": "Corpus cross-reference knowledge graph"
+    },
+    "/profiles/{userId}": {
+      "schema": "Profile",
+      "description": "User profiles and permissions"
+    },
+    "/saved_ideas/{saveId}": {
+      "schema": "SavedIdea",
+      "description": "User private saved discoveries"
+    },
+    "/collections/{collectionId}": {
+      "schema": "Collection",
+      "description": "User private custom collections"
+    },
+    "/notes/{noteId}": {
+      "schema": "Note",
+      "description": "User private study reflection notes"
+    },
+    "/user_progress/{progressId}": {
+      "schema": "UserProgress",
+      "description": "User lesson completion progress"
+    }
+  }
+}

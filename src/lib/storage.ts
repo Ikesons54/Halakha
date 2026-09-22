@@ -18,6 +18,7 @@ import {
   INITIAL_STUDY_PATHS,
   INITIAL_KNOWLEDGE_GRAPH,
 } from '../data/initialData';
+import { DatabaseService } from './database';
 
 const STORAGE_KEYS = {
   PROFILE: 'halakha_profile_v1',
@@ -63,7 +64,7 @@ function getStorageRaw(key: string): string | null {
 }
 
 const DEFAULT_PROFILE: Profile = {
-  id: 'user-default-1',
+  id: 'guest',
   displayName: 'Saved Soul',
   avatarUrl: '',
   bio: 'Seeking to understand Scripture in its original Jewish and Messianic context.',
@@ -74,13 +75,13 @@ const DEFAULT_PROFILE: Profile = {
   selectedTopics: ['messiah', 'feasts', 'torah', 'prophecy'],
   streakDays: 7,
   lastActiveDate: new Date().toISOString().split('T')[0],
-  role: 'user', // toggle to 'admin'
+  role: 'user',
 };
 
 const DEFAULT_COLLECTIONS: Collection[] = [
   {
     id: 'col-1',
-    userId: 'user-default-1',
+    userId: 'guest',
     name: 'My Messianic Prophecy Study',
     description: 'Foundational passages predicting the Suffering Servant and King in the Tanakh.',
     createdAt: new Date().toISOString(),
@@ -89,7 +90,7 @@ const DEFAULT_COLLECTIONS: Collection[] = [
   },
   {
     id: 'col-2',
-    userId: 'user-default-1',
+    userId: 'guest',
     name: 'Passover & The Moedim',
     description: 'Exploring the appointed times and their prophetic fulfillment in Yeshua.',
     createdAt: new Date().toISOString(),
@@ -101,7 +102,7 @@ const DEFAULT_COLLECTIONS: Collection[] = [
 const DEFAULT_NOTES: Note[] = [
   {
     id: 'note-1',
-    userId: 'user-default-1',
+    userId: 'guest',
     ideaId: 'idea-1',
     referenceTitle: 'The Suffering Servant & The King',
     content: 'Targum Jonathan explicitly translates Isaiah 52:13 with "Behold, my servant the Messiah shall prosper." Shows ancient Jewish recognition of the Messianic nature of the text.',
@@ -110,7 +111,7 @@ const DEFAULT_NOTES: Note[] = [
   },
   {
     id: 'note-2',
-    userId: 'user-default-1',
+    userId: 'guest',
     scriptureId: 'sc-2',
     referenceTitle: 'Exodus 12:13 — The Blood of the Lamb',
     content: 'The blood applied on the lintel and posts formed three contact points. The sign of protective cover from judgment.',
@@ -134,6 +135,12 @@ export class StorageService {
     const current = this.getProfile();
     const updated = { ...current, ...profile };
     localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(updated));
+
+    // Also sync to cloud if user is signed in
+    const currentUser = DatabaseService.getCurrentUser();
+    if (currentUser) {
+      DatabaseService.updateProfile(currentUser.uid, profile).catch(console.error);
+    }
     return updated;
   }
 
@@ -181,6 +188,7 @@ export class StorageService {
     };
     list.unshift(newItem);
     localStorage.setItem(STORAGE_KEYS.SCRIPTURES, JSON.stringify(list));
+    DatabaseService.saveScripture(newItem).catch(console.error);
     return newItem;
   }
 
@@ -210,6 +218,7 @@ export class StorageService {
     const list = this.getIdeas();
     const now = new Date().toISOString();
     const existingIndex = list.findIndex((i) => i.id === ideaData.id);
+    let finalIdea: Idea;
 
     if (existingIndex >= 0) {
       const updated: Idea = {
@@ -221,8 +230,7 @@ export class StorageService {
         updated.publishedAt = now;
       }
       list[existingIndex] = updated;
-      localStorage.setItem(STORAGE_KEYS.IDEAS, JSON.stringify(list));
-      return updated;
+      finalIdea = updated;
     } else {
       const newIdea: Idea = {
         id: ideaData.id || `idea-${Date.now()}`,
@@ -246,14 +254,19 @@ export class StorageService {
         readTimeMinutes: ideaData.readTimeMinutes || 3,
       };
       list.unshift(newIdea);
-      localStorage.setItem(STORAGE_KEYS.IDEAS, JSON.stringify(list));
-      return newIdea;
+      finalIdea = newIdea;
     }
+
+    localStorage.setItem(STORAGE_KEYS.IDEAS, JSON.stringify(list));
+    // Asynchronously update cloud Firestore
+    DatabaseService.saveIdea(finalIdea).catch(console.error);
+    return finalIdea;
   }
 
   static deleteIdea(id: string): void {
     const list = this.getIdeas().filter((i) => i.id !== id);
     localStorage.setItem(STORAGE_KEYS.IDEAS, JSON.stringify(list));
+    DatabaseService.deleteIdea(id).catch(console.error);
   }
 
   // Study Paths
@@ -274,86 +287,46 @@ export class StorageService {
     return this.getStudyPaths().find((sp) => sp.id === id);
   }
 
-  // User Progress
-  static getUserProgress(): UserProgress[] {
+  // Saved Ideas
+  static getSavedIdeas(): SavedIdea[] {
     try {
-      const data = getStorageRaw(STORAGE_KEYS.USER_PROGRESS);
+      const data = getStorageRaw(STORAGE_KEYS.SAVED_IDEAS);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
     }
   }
 
-  static markLessonComplete(studyPathId: string, lessonId: string): void {
-    const list = this.getUserProgress();
-    const existing = list.find((p) => p.studyPathId === studyPathId && p.lessonId === lessonId);
-    if (existing) {
-      existing.status = 'COMPLETED';
-      existing.completedAt = new Date().toISOString();
-    } else {
-      list.push({
-        id: `prog-${Date.now()}`,
-        userId: this.getProfile().id,
-        studyPathId,
-        lessonId,
-        status: 'COMPLETED',
-        completedAt: new Date().toISOString(),
-      });
-    }
-    localStorage.setItem(STORAGE_KEYS.USER_PROGRESS, JSON.stringify(list));
-  }
-
-  static getStudyPathProgress(studyPathId: string): { completed: number; total: number; percentage: number } {
-    const path = this.getStudyPathById(studyPathId);
-    if (!path) return { completed: 0, total: 0, percentage: 0 };
-    const progress = this.getUserProgress().filter(
-      (p) => p.studyPathId === studyPathId && p.status === 'COMPLETED'
-    );
-    const total = path.lessons.length;
-    const completed = progress.length;
-    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-    return { completed, total, percentage };
-  }
-
-  // Saved Ideas
-  static getSavedIdeas(): SavedIdea[] {
-    try {
-      const data = getStorageRaw(STORAGE_KEYS.SAVED_IDEAS);
-      if (!data) {
-        const init = [
-          { id: 'save-1', userId: 'user-default-1', ideaId: 'idea-1', savedAt: new Date().toISOString() },
-          { id: 'save-2', userId: 'user-default-1', ideaId: 'idea-2', savedAt: new Date().toISOString() },
-        ];
-        localStorage.setItem(STORAGE_KEYS.SAVED_IDEAS, JSON.stringify(init));
-        return init;
-      }
-      return JSON.parse(data);
-    } catch {
-      return [];
-    }
-  }
-
   static isIdeaSaved(ideaId: string): boolean {
-    return this.getSavedIdeas().some((s) => s.ideaId === ideaId);
+    const list = this.getSavedIdeas();
+    return list.some((s) => s.ideaId === ideaId);
   }
 
   static toggleSaveIdea(ideaId: string): boolean {
     const list = this.getSavedIdeas();
     const index = list.findIndex((s) => s.ideaId === ideaId);
+    let newState = false;
+    const currentUser = DatabaseService.getCurrentUser();
+    const currentUserId = currentUser ? currentUser.uid : this.getProfile().id;
+
     if (index >= 0) {
       list.splice(index, 1);
-      localStorage.setItem(STORAGE_KEYS.SAVED_IDEAS, JSON.stringify(list));
-      return false;
+      newState = false;
     } else {
-      list.unshift({
+      list.push({
         id: `save-${Date.now()}`,
-        userId: this.getProfile().id,
+        userId: currentUserId,
         ideaId,
         savedAt: new Date().toISOString(),
       });
-      localStorage.setItem(STORAGE_KEYS.SAVED_IDEAS, JSON.stringify(list));
-      return true;
+      newState = true;
     }
+    localStorage.setItem(STORAGE_KEYS.SAVED_IDEAS, JSON.stringify(list));
+
+    if (currentUser) {
+      DatabaseService.toggleSaveIdea(currentUser.uid, ideaId).catch(console.error);
+    }
+    return newState;
   }
 
   // Collections
@@ -372,9 +345,12 @@ export class StorageService {
 
   static createCollection(name: string, description: string): Collection {
     const list = this.getCollections();
+    const currentUser = DatabaseService.getCurrentUser();
+    const currentUserId = currentUser ? currentUser.uid : this.getProfile().id;
+
     const newCol: Collection = {
       id: `col-${Date.now()}`,
-      userId: this.getProfile().id,
+      userId: currentUserId,
       name,
       description,
       createdAt: new Date().toISOString(),
@@ -383,6 +359,10 @@ export class StorageService {
     };
     list.unshift(newCol);
     localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(list));
+
+    if (currentUser) {
+      DatabaseService.saveCollection(currentUser.uid, newCol).catch(console.error);
+    }
     return newCol;
   }
 
@@ -393,6 +373,11 @@ export class StorageService {
       col.ideaIds.push(ideaId);
       col.updatedAt = new Date().toISOString();
       localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(list));
+
+      const currentUser = DatabaseService.getCurrentUser();
+      if (currentUser) {
+        DatabaseService.saveCollection(currentUser.uid, col).catch(console.error);
+      }
     }
   }
 
@@ -403,6 +388,20 @@ export class StorageService {
       col.ideaIds = col.ideaIds.filter((id) => id !== ideaId);
       col.updatedAt = new Date().toISOString();
       localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(list));
+
+      const currentUser = DatabaseService.getCurrentUser();
+      if (currentUser) {
+        DatabaseService.saveCollection(currentUser.uid, col).catch(console.error);
+      }
+    }
+  }
+
+  static deleteCollection(collectionId: string): void {
+    const list = this.getCollections().filter((c) => c.id !== collectionId);
+    localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(list));
+    const currentUser = DatabaseService.getCurrentUser();
+    if (currentUser) {
+      DatabaseService.deleteCollection(currentUser.uid, collectionId).catch(console.error);
     }
   }
 
@@ -423,17 +422,23 @@ export class StorageService {
   static saveNote(note: Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'userId'> & { id?: string }): Note {
     const list = this.getNotes();
     const now = new Date().toISOString();
+    const currentUser = DatabaseService.getCurrentUser();
+    const currentUserId = currentUser ? currentUser.uid : this.getProfile().id;
+
     if (note.id) {
       const index = list.findIndex((n) => n.id === note.id);
       if (index >= 0) {
         list[index] = { ...list[index], ...note, updatedAt: now };
         localStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(list));
+        if (currentUser) {
+          DatabaseService.saveNote(currentUser.uid, list[index]).catch(console.error);
+        }
         return list[index];
       }
     }
     const newNote: Note = {
       id: `note-${Date.now()}`,
-      userId: this.getProfile().id,
+      userId: currentUserId,
       referenceTitle: note.referenceTitle,
       content: note.content,
       ideaId: note.ideaId,
@@ -443,12 +448,67 @@ export class StorageService {
     };
     list.unshift(newNote);
     localStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(list));
+
+    if (currentUser) {
+      DatabaseService.saveNote(currentUser.uid, newNote).catch(console.error);
+    }
     return newNote;
   }
 
   static deleteNote(id: string): void {
     const list = this.getNotes().filter((n) => n.id !== id);
     localStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(list));
+    const currentUser = DatabaseService.getCurrentUser();
+    if (currentUser) {
+      DatabaseService.deleteNote(currentUser.uid, id).catch(console.error);
+    }
+  }
+
+  // User Progress
+  static getUserProgress(): UserProgress[] {
+    try {
+      const data = getStorageRaw(STORAGE_KEYS.USER_PROGRESS);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static markLessonComplete(studyPathId: string, lessonId: string): void {
+    const list = this.getUserProgress();
+    const existing = list.find((p) => p.studyPathId === studyPathId && p.lessonId === lessonId);
+    const currentUser = DatabaseService.getCurrentUser();
+    const currentUserId = currentUser ? currentUser.uid : this.getProfile().id;
+
+    if (!existing) {
+      list.push({
+        id: `prog-${Date.now()}`,
+        userId: currentUserId,
+        studyPathId,
+        lessonId,
+        status: 'COMPLETED',
+        completedAt: new Date().toISOString(),
+      });
+      localStorage.setItem(STORAGE_KEYS.USER_PROGRESS, JSON.stringify(list));
+
+      if (currentUser) {
+        DatabaseService.completeLesson(currentUser.uid, studyPathId, lessonId).catch(console.error);
+      }
+    }
+  }
+
+  static getStudyPathProgress(studyPathId: string): { completed: number; total: number; percentage: number } {
+    const studyPath = this.getStudyPathById(studyPathId);
+    if (!studyPath) return { completed: 0, total: 0, percentage: 0 };
+
+    const total = studyPath.lessons.length;
+    const progress = this.getUserProgress();
+    const completed = progress.filter(
+      (p) => p.studyPathId === studyPathId && p.status === 'COMPLETED'
+    ).length;
+
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { completed, total, percentage };
   }
 
   // Knowledge Graph
@@ -465,75 +525,52 @@ export class StorageService {
     }
   }
 
-  // V1 Recommendation Logic matching Section 20
-  // Messiah preference +5, Previously saved topic +3, Related to current study +4, Featured +2
-  static getRecommendedIdeas(): Idea[] {
-    const profile = this.getProfile();
-    const published = this.getPublishedIdeas();
-    const saved = this.getSavedIdeas();
-    const savedIdeaIds = new Set(saved.map((s) => s.ideaId));
-
-    const scored = published.map((idea) => {
-      let score = 0;
-      // Topic interest match
-      const matchesUserTopic = idea.topicSlugs.some((ts) => profile.selectedTopics.includes(ts));
-      if (matchesUserTopic) score += 5;
-
-      // Featured content bonus
-      if (idea.featured) score += 2;
-
-      // Topic was saved previously
-      const savedIdeasObj = published.filter((i) => savedIdeaIds.has(i.id));
-      const savedTopicSlugs = new Set(savedIdeasObj.flatMap((i) => i.topicSlugs));
-      if (idea.topicSlugs.some((ts) => savedTopicSlugs.has(ts))) score += 3;
-
-      // Available time filter compatibility
-      if (profile.availableTime === '5_MIN' && idea.readTimeMinutes <= 3) score += 2;
-
-      return { idea, score };
-    });
-
-    scored.sort((a, b) => b.score - a.score);
-    return scored.map((s) => s.idea);
-  }
-
-  // Search Engine
-  static searchAll(query: string) {
-    const q = query.trim().toLowerCase();
+  // Universal Search
+  static searchAll(queryStr: string): {
+    ideas: Idea[];
+    scriptures: Scripture[];
+    topics: Topic[];
+    studyPaths: StudyPath[];
+  } {
+    const q = queryStr.toLowerCase().trim();
     if (!q) {
       return { ideas: [], scriptures: [], topics: [], studyPaths: [] };
     }
 
-    const ideas = this.getPublishedIdeas().filter(
+    const matchedIdeas = this.getPublishedIdeas().filter(
       (i) =>
         i.title.toLowerCase().includes(q) ||
+        i.hook.toLowerCase().includes(q) ||
         i.summary.toLowerCase().includes(q) ||
         i.content.toLowerCase().includes(q) ||
-        i.category.toLowerCase().includes(q) ||
-        i.context.toLowerCase().includes(q)
+        i.category.toLowerCase().includes(q)
     );
 
-    const scriptures = this.getScriptures().filter(
+    const matchedScriptures = this.getScriptures().filter(
       (s) =>
         s.reference.toLowerCase().includes(q) ||
         s.text.toLowerCase().includes(q) ||
         s.book.toLowerCase().includes(q)
     );
 
-    const topics = this.getTopics().filter(
+    const matchedTopics = this.getTopics().filter(
       (t) =>
         t.name.toLowerCase().includes(q) ||
         t.description.toLowerCase().includes(q) ||
-        (t.hebrewName && t.hebrewName.includes(q)) ||
         (t.hebrewMeaning && t.hebrewMeaning.toLowerCase().includes(q))
     );
 
-    const studyPaths = this.getStudyPaths().filter(
+    const matchedStudyPaths = this.getStudyPaths().filter(
       (sp) =>
         sp.title.toLowerCase().includes(q) ||
         sp.description.toLowerCase().includes(q)
     );
 
-    return { ideas, scriptures, topics, studyPaths };
+    return {
+      ideas: matchedIdeas,
+      scriptures: matchedScriptures,
+      topics: matchedTopics,
+      studyPaths: matchedStudyPaths,
+    };
   }
 }

@@ -13,9 +13,10 @@ import {
   Eye,
   Check,
   X,
+  Database,
 } from 'lucide-react';
 import { Idea, Topic, Scripture, ContentStatus } from '../../types';
-import { StorageService } from '../../lib/storage';
+import { DatabaseService } from '../../lib/database';
 
 interface AdminDashboardProps {
   ideas: Idea[];
@@ -35,6 +36,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [statusFilter, setStatusFilter] = useState<'ALL' | ContentStatus>('ALL');
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingIdea, setEditingIdea] = useState<Partial<Idea> | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -64,6 +67,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleOpenCreate = () => {
     setEditingIdea(null);
+    setErrorMessage(null);
     setTitle('');
     setCategory('Messiah');
     setHook('');
@@ -81,6 +85,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleOpenEdit = (idea: Idea) => {
     setEditingIdea(idea);
+    setErrorMessage(null);
     setTitle(idea.title);
     setCategory(idea.category);
     setHook(idea.hook || '');
@@ -96,58 +101,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsEditorOpen(true);
   };
 
-  const handleSaveIdea = (e: React.FormEvent) => {
+  const handleSaveIdea = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !category) return;
 
-    StorageService.saveIdea({
-      id: editingIdea?.id,
-      title: title.trim(),
-      category,
-      hook: hook.trim() || summary.trim(),
-      summary: summary.trim(),
-      content: content.trim() || summary.trim(),
-      context: context.trim(),
-      interpretation: interpretation.trim(),
-      application: application.trim(),
-      status,
-      featured,
-      scriptureIds: selectedScriptureIds,
-      readTimeMinutes: Number(readTimeMinutes) || 3,
-      topicSlugs: [category.toLowerCase()],
-    });
+    setIsSubmitting(true);
+    setErrorMessage(null);
 
-    setIsEditorOpen(false);
-    onDataChanged();
-  };
+    try {
+      await DatabaseService.saveIdea({
+        id: editingIdea?.id || `idea-${Date.now()}`,
+        title: title.trim(),
+        slug: title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        category,
+        hook: hook.trim() || summary.trim(),
+        summary: summary.trim(),
+        content: content.trim() || summary.trim(),
+        context: context.trim(),
+        interpretation: interpretation.trim(),
+        application: application.trim(),
+        status,
+        featured,
+        createdBy: editingIdea?.createdBy || 'admin',
+        createdAt: editingIdea?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        publishedAt: status === 'PUBLISHED' ? new Date().toISOString() : editingIdea?.publishedAt,
+        scriptureIds: selectedScriptureIds,
+        readTimeMinutes: Number(readTimeMinutes) || 3,
+        topicSlugs: [category.toLowerCase()],
+      });
 
-  const handleDelete = (id: string) => {
-    if (confirm('Are you sure you want to delete this discovery?')) {
-      StorageService.deleteIdea(id);
+      setIsEditorOpen(false);
       onDataChanged();
+    } catch (err: unknown) {
+      console.error('Failed to save to cloud database:', err);
+      const msg = err instanceof Error ? err.message : 'Permission denied or network error';
+      setErrorMessage(msg);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleQuickStatusChange = (idea: Idea, newStatus: ContentStatus) => {
-    StorageService.saveIdea({
-      ...idea,
-      status: newStatus,
-    });
-    onDataChanged();
+  const handleDelete = async (id: string) => {
+    if (confirm('Are you sure you want to delete this discovery from the cloud database?')) {
+      try {
+        await DatabaseService.deleteIdea(id);
+        onDataChanged();
+      } catch (err: unknown) {
+        alert('Could not delete idea: Only verified admins can delete production content.');
+      }
+    }
   };
 
-  const getStatusBadge = (s: ContentStatus) => {
-    switch (s) {
-      case 'PUBLISHED':
-        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
-      case 'APPROVED':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300';
-      case 'IN_REVIEW':
-        return 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
-      case 'DRAFT':
-        return 'bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300';
-      case 'ARCHIVED':
-        return 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300';
+  const handleQuickStatusChange = async (idea: Idea, newStatus: ContentStatus) => {
+    try {
+      await DatabaseService.saveIdea({
+        ...idea,
+        status: newStatus,
+        publishedAt: newStatus === 'PUBLISHED' ? new Date().toISOString() : idea.publishedAt,
+      });
+      onDataChanged();
+    } catch (err: unknown) {
+      alert('Could not update status: Admin privileges required.');
     }
   };
 
@@ -159,14 +174,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-[#B39452]" />
             <span className="text-xs font-bold uppercase tracking-widest text-[#B39452]">
-              HALAKHA Editorial CMS
+              HALAKHA Cloud Editorial CMS
             </span>
           </div>
           <h1 className="font-scripture text-3xl font-bold text-[#202421] dark:text-[#F3F0E8] mt-1">
             Admin Content & Editorial Pipeline
           </h1>
           <p className="text-xs text-[#69716B] dark:text-[#AEB6AF] mt-0.5">
-            Maintain strict theological rigor, separate text from interpretation, and publish to the live discovery feed.
+            Synchronized directly to Firestore with server-enforced security rules.
           </p>
         </div>
 
@@ -299,54 +314,79 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </span>
                       )}
                     </div>
+                    <span className="text-[11px] text-[#69716B] dark:text-[#AEB6AF] line-clamp-1 mt-0.5">
+                      {idea.hook}
+                    </span>
                   </td>
                   <td className="py-3.5 px-3">
-                    <span className="px-2 py-0.5 rounded bg-[#E8DDC8]/50 dark:bg-[#222C27] text-[#263A32] dark:text-[#E8DDC8] font-semibold">
+                    <span className="px-2 py-0.5 rounded-md bg-[#FAF8F5] dark:bg-[#19221E] border border-[#E8DDC8] dark:border-[#2E3B33] font-medium text-[11px]">
                       {idea.category}
                     </span>
                   </td>
                   <td className="py-3.5 px-3">
-                    <select
-                      value={idea.status}
-                      onChange={(e) =>
-                        handleQuickStatusChange(idea, e.target.value as ContentStatus)
-                      }
-                      className={`text-[11px] font-bold rounded-md px-2 py-1 border-0 focus:ring-1 focus:ring-[#B39452] ${getStatusBadge(
-                        idea.status
-                      )}`}
+                    <span
+                      className={`px-2 py-0.5 rounded-full font-bold text-[10px] tracking-wider uppercase ${
+                        idea.status === 'PUBLISHED'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                          : idea.status === 'APPROVED'
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
+                          : idea.status === 'IN_REVIEW'
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                          : 'bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300'
+                      }`}
                     >
-                      <option value="DRAFT">DRAFT</option>
-                      <option value="IN_REVIEW">IN REVIEW</option>
-                      <option value="APPROVED">APPROVED</option>
-                      <option value="PUBLISHED">PUBLISHED</option>
-                      <option value="ARCHIVED">ARCHIVED</option>
-                    </select>
+                      {idea.status}
+                    </span>
                   </td>
-                  <td className="py-3.5 px-3 text-[#69716B] dark:text-[#AEB6AF] font-mono">
-                    {idea.scriptureIds?.length || 0} attached
+                  <td className="py-3.5 px-3">
+                    <div className="flex flex-wrap gap-1">
+                      {idea.scriptureIds.map((scId) => {
+                        const sc = scriptures.find((s) => s.id === scId);
+                        return (
+                          <span
+                            key={scId}
+                            className="px-1.5 py-0.5 rounded bg-[#B39452]/15 text-[#B39452] font-mono text-[10px]"
+                          >
+                            {sc ? sc.reference : scId}
+                          </span>
+                        );
+                      })}
+                    </div>
                   </td>
                   <td className="py-3.5 px-3 text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       <button
                         onClick={() => onPreviewIdea(idea)}
+                        title="Preview 5-Layer Card"
                         className="p-1.5 rounded-lg text-[#69716B] hover:text-[#202421] dark:hover:text-[#F3F0E8] hover:bg-[#E8DDC8]/40"
-                        title="Preview Idea Card"
                       >
-                        <Eye className="w-4 h-4" />
+                        <Eye className="w-3.5 h-3.5" />
                       </button>
+
+                      {idea.status !== 'PUBLISHED' && (
+                        <button
+                          onClick={() => handleQuickStatusChange(idea, 'PUBLISHED')}
+                          title="Quick Publish to Feed"
+                          className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
                       <button
                         onClick={() => handleOpenEdit(idea)}
-                        className="p-1.5 rounded-lg text-[#69716B] hover:text-[#202421] dark:hover:text-[#F3F0E8] hover:bg-[#E8DDC8]/40"
                         title="Edit Idea"
+                        className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
                       >
-                        <Edit className="w-4 h-4 text-[#B39452]" />
+                        <Edit className="w-3.5 h-3.5" />
                       </button>
+
                       <button
                         onClick={() => handleDelete(idea.id)}
-                        className="p-1.5 rounded-lg text-[#69716B] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
                         title="Delete Idea"
+                        className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </td>
@@ -357,30 +397,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </section>
 
-      {/* Idea Create / Edit Modal (5-layer content creator) */}
+      {/* Editor Modal */}
       {isEditorOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs">
-          <div className="w-full max-w-2xl max-h-[92vh] bg-white dark:bg-[#1C2420] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-[#E8DDC8] dark:border-[#2E3B33] flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#B39452]">
-                  5-Layer Content Model
-                </span>
-                <h3 className="font-scripture text-2xl font-bold text-[#202421] dark:text-[#F3F0E8]">
-                  {editingIdea ? 'Edit Discovery Card' : 'Create New Discovery'}
-                </h3>
-              </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white dark:bg-[#1C2420] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[#E8DDC8]/60 dark:border-[#2E3B33] pb-3">
+              <h2 className="font-scripture text-2xl font-bold text-[#202421] dark:text-[#F3F0E8]">
+                {editingIdea ? 'Edit Discovery' : 'New 5-Layer Discovery'}
+              </h2>
               <button
                 onClick={() => setIsEditorOpen(false)}
-                className="p-1.5 rounded-lg text-[#69716B] hover:text-black dark:hover:text-white"
+                className="p-1.5 rounded-lg text-[#69716B] hover:text-[#202421] hover:bg-[#E8DDC8]/40"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Modal Scroll Form */}
-            <form onSubmit={handleSaveIdea} className="flex-1 overflow-y-auto p-6 space-y-4 text-xs">
+            {errorMessage && (
+              <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300 text-xs">
+                {errorMessage}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveIdea} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
                   <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
@@ -389,25 +428,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="e.g. The Suffering Servant & The King"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs text-[#202421] dark:text-[#F3F0E8] focus:outline-none focus:ring-2 focus:ring-[#B39452]"
+                    placeholder="e.g. The Suffering Servant of Isaiah"
+                    className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#B39452]"
                   />
                 </div>
 
                 <div>
                   <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
-                    Category Pillar *
+                    Category *
                   </label>
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs text-[#202421] dark:text-[#F3F0E8] focus:outline-none focus:ring-2 focus:ring-[#B39452]"
+                    className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#B39452]"
                   >
                     {topics.map((t) => (
                       <option key={t.id} value={t.name}>
-                        {t.name}
+                        {t.name} ({t.hebrewName || ''})
                       </option>
                     ))}
                   </select>
@@ -417,109 +456,108 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {/* Layer 1: Hook */}
               <div>
                 <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
-                  Layer 1 — The Hook (One compelling introductory sentence)
+                  Layer 1: Hook (Curiosity statement) *
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. The wilderness was never just a desert path; it is God's sacred crucible."
+                  required
                   value={hook}
                   onChange={(e) => setHook(e.target.value)}
-                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs text-[#202421] dark:text-[#F3F0E8] focus:outline-none focus:ring-2 focus:ring-[#B39452]"
+                  placeholder="One striking sentence highlighting the mystery or connection..."
+                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#B39452]"
                 />
               </div>
 
-              {/* Layer 2: Summary */}
+              {/* Layer 2: Core Idea Summary */}
               <div>
                 <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
-                  Layer 2 — Core Idea Summary *
+                  Layer 2: Core Idea Summary *
                 </label>
                 <textarea
                   rows={2}
                   required
-                  placeholder="Short, crystal-clear explanation of the biblical discovery..."
                   value={summary}
                   onChange={(e) => setSummary(e.target.value)}
-                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl p-2.5 text-xs text-[#202421] dark:text-[#F3F0E8] focus:outline-none focus:ring-2 focus:ring-[#B39452] resize-none"
+                  placeholder="Concise 2-3 sentence overview of the core biblical insight..."
+                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#B39452]"
                 />
               </div>
 
-              {/* Layer 4: Context */}
+              {/* Layer 3: Linked Scriptures */}
               <div>
                 <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
-                  Layer 4 — Historical & Linguistic Context
+                  Layer 3: Primary Scriptures Linked
                 </label>
-                <textarea
-                  rows={2}
-                  placeholder="Second Temple context, Hebrew word roots, cultural background..."
-                  value={context}
-                  onChange={(e) => setContext(e.target.value)}
-                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl p-2.5 text-xs text-[#202421] dark:text-[#F3F0E8] focus:outline-none focus:ring-2 focus:ring-[#B39452] resize-none"
-                />
-              </div>
-
-              {/* Layer 5: Interpretation */}
-              <div>
-                <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
-                  Layer 5 — Messianic Jewish Interpretation (Distinct from raw Scripture text)
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="How Messianic Jewish tradition and Apostolic Scripture understand this..."
-                  value={interpretation}
-                  onChange={(e) => setInterpretation(e.target.value)}
-                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl p-2.5 text-xs text-[#202421] dark:text-[#F3F0E8] focus:outline-none focus:ring-2 focus:ring-[#B39452] resize-none"
-                />
-              </div>
-
-              {/* Practical Application */}
-              <div>
-                <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
-                  Practical Application
-                </label>
-                <input
-                  type="text"
-                  placeholder="How does this transform personal discipleship and worship today?"
-                  value={application}
-                  onChange={(e) => setApplication(e.target.value)}
-                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs text-[#202421] dark:text-[#F3F0E8] focus:outline-none focus:ring-2 focus:ring-[#B39452]"
-                />
-              </div>
-
-              {/* Scripture Attachment Picker */}
-              <div>
-                <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
-                  Attached Scripture Passages
-                </label>
-                <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto p-2 bg-[#F8F6F0] dark:bg-[#151D19] rounded-xl border border-[#E8DDC8] dark:border-[#2E3B33]">
+                <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl bg-[#F8F6F0] dark:bg-[#151D19]">
                   {scriptures.map((sc) => {
                     const isSelected = selectedScriptureIds.includes(sc.id);
                     return (
-                      <label
+                      <button
+                        type="button"
                         key={sc.id}
-                        className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer text-xs ${
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedScriptureIds(selectedScriptureIds.filter((id) => id !== sc.id));
+                          } else {
+                            setSelectedScriptureIds([...selectedScriptureIds, sc.id]);
+                          }
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-mono transition-all ${
                           isSelected
-                            ? 'bg-[#B39452]/20 font-semibold text-[#263A32] dark:text-[#E8DDC8]'
-                            : 'hover:bg-black/5 dark:hover:bg-white/5'
+                            ? 'bg-[#B39452] text-[#263A32] font-bold'
+                            : 'bg-white dark:bg-[#1C2420] text-[#69716B] border border-[#E8DDC8] dark:border-[#2E3B33]'
                         }`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedScriptureIds([...selectedScriptureIds, sc.id]);
-                            } else {
-                              setSelectedScriptureIds(
-                                selectedScriptureIds.filter((id) => id !== sc.id)
-                              );
-                            }
-                          }}
-                        />
-                        <span>{sc.reference}</span>
-                      </label>
+                        {sc.reference}
+                      </button>
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Layer 4: Context (Evidence & Second Temple Background) */}
+              <div>
+                <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
+                  Layer 4: Historical, Linguistic & Second Temple Context *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={context}
+                  onChange={(e) => setContext(e.target.value)}
+                  placeholder="Hebrew nuances, ancient Near Eastern or Second Temple Jewish context..."
+                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#B39452]"
+                />
+              </div>
+
+              {/* Layer 5A: Messianic Interpretation */}
+              <div>
+                <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
+                  Layer 5A: Messianic Jewish Interpretation *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={interpretation}
+                  onChange={(e) => setInterpretation(e.target.value)}
+                  placeholder="How this illuminates the person, mission, and kingship of Yeshua..."
+                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#B39452]"
+                />
+              </div>
+
+              {/* Layer 5B: Practical Life Application */}
+              <div>
+                <label className="font-semibold text-[#263A32] dark:text-[#E8DDC8] block mb-1">
+                  Layer 5B: Practical Life Application *
+                </label>
+                <textarea
+                  rows={2}
+                  required
+                  value={application}
+                  onChange={(e) => setApplication(e.target.value)}
+                  placeholder="How the disciple walks (halakha) in light of this truth today..."
+                  className="w-full bg-[#F8F6F0] dark:bg-[#151D19] border border-[#E8DDC8] dark:border-[#2E3B33] rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#B39452]"
+                />
               </div>
 
               {/* Status & Featured */}
@@ -564,9 +602,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-[#263A32] hover:bg-[#1F2F29] text-[#F8F6F0] text-xs font-semibold shadow-xs"
+                  disabled={isSubmitting}
+                  className="px-5 py-2.5 rounded-xl bg-[#263A32] hover:bg-[#1F2F29] text-[#F8F6F0] text-xs font-semibold shadow-xs disabled:opacity-50"
                 >
-                  {status === 'PUBLISHED' ? 'Publish Discovery Live' : 'Save as ' + status}
+                  {isSubmitting ? 'Saving to Firestore...' : status === 'PUBLISHED' ? 'Publish Discovery Live' : 'Save as ' + status}
                 </button>
               </div>
             </form>
