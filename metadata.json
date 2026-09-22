@@ -1,0 +1,6 @@
+{
+  "name": "HALAKHA — Scripture Discovery & Study",
+  "description": "HALAKHA: A Scripture discovery and study platform exploring the biblical world through a Messianic Jewish lens. Discover Scripture. See the connections. Go deeper.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
