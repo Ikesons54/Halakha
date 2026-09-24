@@ -1,15 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
-import firebaseConfig from '../../firebase-applet-config.json';
 
-// Initialize Supabase client using configuration from firebase-applet-config.json
-// with support for environment overrides
-const supabaseUrl =
-  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) ||
-  `https://${firebaseConfig.projectId}.supabase.co`;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-const supabaseAnonKey =
-  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY) ||
-  firebaseConfig.apiKey;
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    'Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY. Configure them in GitHub Actions.'
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
