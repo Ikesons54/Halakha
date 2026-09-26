@@ -65,6 +65,10 @@ npm run dev
 
 The application runs on `http://localhost:3000`.
 
+### GitHub Pages Deployment
+
+The Pages workflow requires both `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repository Actions secrets. Add them under **Settings → Secrets and variables → Actions → Repository secrets**, using the project URL and anon/publishable key from Supabase. The workflow checks these values before building so a missing secret cannot produce a successful but nonfunctional deployment.
+
 ### Production Build
 
 ```bash
