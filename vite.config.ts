@@ -19,4 +19,12 @@ export default defineConfig({
     hmr: process.env.DISABLE_HMR !== 'true',
     watch: process.env.DISABLE_HMR === 'true' ? null : {},
   },
+  export default defineConfig({
+  base: '/Halakha/',
+  build: {
+    target: ['es2020', 'safari15'],
+    sourcemap: true,
+  },
+...
+});
 });
