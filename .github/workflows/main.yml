@@ -21,32 +21,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 1
 
-      - name: Verify checkout
-        run: |
-          echo "Workspace: $GITHUB_WORKSPACE"
-          test -f "$GITHUB_WORKSPACE/package.json"
-          ls -la "$GITHUB_WORKSPACE"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
         with:
-          node-version: 22
-          cache: npm
+          bun-version: latest
 
       - name: Install dependencies
-        working-directory: ${{ github.workspace }}
-        run: npm install
+        run: bun install
 
       - name: Build HALAKHA
-        working-directory: ${{ github.workspace }}
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-        run: npm run build
+        run: bun run build
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
@@ -54,7 +42,7 @@ jobs:
       - name: Upload build
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ github.workspace }}/dist
+          path: ./dist
 
   deploy:
     name: Deploy to GitHub Pages
